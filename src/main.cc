@@ -2,13 +2,14 @@
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_render.h>
 #include <SDL3/SDL_video.h>
+#include <iomanip>
 #include <iostream>
 #include <vector>
 #include <cmath>
 #include <complex>
 
 const int WINDOW_SIZE = 800; //576;
-const int MATRIX_SIZE = 64;
+const int MATRIX_SIZE = 64*8;
 const int MAX_ITERATIONS = 0xff;
 const int PIXEL_SIZE = WINDOW_SIZE / MATRIX_SIZE;
 
@@ -87,8 +88,7 @@ std::complex<double> lerp_complex(std::complex<double> a, std::complex<double> b
     return a * (1.0 - t) + b * t;
 }
 
-void juliaSet(SDL_Renderer* renderer, double& t, double& t_step) {
-    const std::complex<double> JULIA_C(-0.8, 0.156);
+void juliaSet(SDL_Renderer* renderer, double& t, const std::vector<std::complex<double>>& julia_constants, int& stage, const int total_stages) {
     // Viewport params
     const double x_min = -2.0;
     const double x_max = 2.0;
@@ -102,11 +102,18 @@ void juliaSet(SDL_Renderer* renderer, double& t, double& t_step) {
                 y_min + (double)y / MATRIX_SIZE * (y_max - y_min)
             );
 
-            // Morphing logic
-            // When t = 0, we have  the Mandelbrot set (z0=0, c=z_pixel).
-            // When t = 1, we have the Julia set (z0=z_pixel, c=JULIA_C).
-            std::complex<double> c = lerp_complex(z_pixel, JULIA_C, t);
-            std::complex<double> z = lerp_complex({0.0, 0.0}, z_pixel, t);
+            std::complex<double> z, c;
+
+            if(stage == 0) {
+                c = lerp_complex(z_pixel, julia_constants[1], t);
+                z = lerp_complex({0.0, 0.0}, z_pixel, t);
+            } else if (stage < total_stages) {
+                c = lerp_complex(julia_constants[stage], julia_constants[stage+1], t);
+                z = z_pixel;
+            } else {
+                c = julia_constants.back();
+                z = z_pixel;
+            }
 
             int i = 0;
             for(i = 0; i < MAX_ITERATIONS && std::norm(z) < 4; i++) {
@@ -136,6 +143,25 @@ void juliaSet(SDL_Renderer* renderer, double& t, double& t_step) {
     }
 }
 
+int get_sequence(int n, int max_val) {
+    if (n <= 0)
+        return 0;
+
+    if (max_val <= 1) {
+        return 0;
+    }
+
+    int cycle_length = 2 * (max_val - 1);
+
+    int cycle_index = (n - 1) % cycle_length;
+
+    if (cycle_index < max_val) {
+        return cycle_index;
+    } else {
+        return cycle_length - cycle_index;
+    }
+}
+
 int main(void) {
     if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) < 0) {
         std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
@@ -161,7 +187,20 @@ int main(void) {
     // SDL_RenderClear(renderer);
 
     double t = 0.0;
-    double t_step = 0.0005;
+    double t_step = 0.05;
+    int stage = 0;
+    const int total_stages = 8;
+    const std::vector<std::complex<double>> julia_constants = {
+        {0.0, 0.0},
+        {-0.8, 0.156},
+        {-0.4, 0.6},
+        {-0.1625, 1.04},
+        {-0.19, 0.65},
+        {-0.725, 0.25},
+        {0.285, 0.01},
+        {-0.4, -0.6},
+        {0.35, -0.1}
+    };
 
     //mandelbrotSetEscapeAlgorithm(renderer);
 
@@ -169,6 +208,7 @@ int main(void) {
 
     bool quit = false;
     SDL_Event e;
+    uint32_t counter = 0;
     while(!quit) {
         while (SDL_PollEvent(&e) != 0) {
             if (e.type == SDL_EVENT_QUIT) {
@@ -179,18 +219,21 @@ int main(void) {
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
 
-        juliaSet(renderer, t, t_step);
+        juliaSet(renderer, t, julia_constants, stage, total_stages);
 
         SDL_RenderPresent(renderer);
 
-        t += t_step;
-        if (t > 1.0) {
-            t = 1.0;
-            t_step *= -1.0;
-        } else if (t < 0.0) {
-            t = 0.0;
-            t_step *= -1.0;
+        if (stage < total_stages) {
+            t += t_step;
+            if (t >= 1.0) {
+                t = 0.0;
+                //++stage;
+                stage = get_sequence(counter++, total_stages);
+            }
         }
+        // if(stage == total_stages) {
+        //     stage = 0;
+        // }
     }
 
     SDL_DestroyRenderer(renderer);
